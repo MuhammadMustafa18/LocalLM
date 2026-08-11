@@ -116,10 +116,24 @@ export default function Home() {
 
       // In guided mode, treat input as quiz answer
       if (guidedMode && activeQuiz && !answeredQuiz) {
-        const letterMatch = text.match(/^[A-Da-d]/);
-        const letter = letterMatch
-          ? letterMatch[0].toUpperCase()
-          : text.trim().toUpperCase().slice(0, 1);
+        // Extract letter A/B/C/D from anywhere in user's text
+        // Priority: explicit "answer is X" / "X)" / standalone letter at end
+        let letter: string | null = null;
+        // Match patterns like "B)", "B.", "(B)", "answer is B", "option B"
+        const explicit = text.match(/(?:answer\s*(?:is)?\s*|^|\s|\()([A-Da-d])(?:\)|\.| |$)/i);
+        if (explicit) {
+          letter = explicit[1].toUpperCase();
+        } else {
+          // Fallback: last standalone single letter A-D
+          const allLetters = text.match(/\b[A-Da-d]\b/g);
+          if (allLetters && allLetters.length > 0) {
+            letter = allLetters[allLetters.length - 1].toUpperCase();
+          } else {
+            // Last resort: first character
+            const firstChar = text.trim().charAt(0).toUpperCase();
+            letter = "ABCD".includes(firstChar) ? firstChar : "A";
+          }
+        }
         setAnsweredQuiz({ quiz: activeQuiz, userAnswer: letter });
         // Send the user's answer to Claude as a regular message
         // Claude will return the next step (or retry)
@@ -307,8 +321,8 @@ export default function Home() {
   const handleQuizAnswer = (letter: string) => {
     if (!activeQuiz) return;
     setAnsweredQuiz({ quiz: activeQuiz, userAnswer: letter });
-    // Auto-send the answer as a message to Claude
-    send(`My answer is ${letter}`);
+    // Send the answer letter directly to Claude (cleaner than full sentence)
+    send(letter);
   };
 
   const handleRevealHint = () => setRevealHint(true);
