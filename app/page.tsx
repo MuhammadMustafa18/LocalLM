@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import ChatPanel, { ChatMsg, Session } from "@/components/ChatPanel";
+import ChatPanel, {
+  ChatMsg,
+  Session,
+  Quiz,
+  Step,
+} from "@/components/ChatPanel";
 
 const CANVAS_URL = process.env.NEXT_PUBLIC_CANVAS_URL ?? "http://localhost:3000";
 const STORAGE_KEY = "teachagent.sessions.v1";
@@ -12,6 +17,7 @@ type StoredSession = {
   createdAt: number;
   messages: ChatMsg[];
   preview: string;
+  guidedMode?: boolean;
 };
 
 function loadSessions(): Record<string, StoredSession> {
@@ -52,6 +58,14 @@ export default function Home() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [guidedMode, setGuidedMode] = useState(false);
+  const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null);
+  const [activeStep, setActiveStep] = useState<Step | null>(null);
+  const [answeredQuiz, setAnsweredQuiz] = useState<{
+    quiz: Quiz;
+    userAnswer: string;
+  } | null>(null);
+  const [revealHint, setRevealHint] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string }>({
     ok: true,
     text: `Canvas: ${CANVAS_URL}`,
@@ -70,13 +84,14 @@ export default function Home() {
       const latest = ids[0];
       setCurrentSessionId(latest);
       setMessages(loaded[latest].messages);
+      if (loaded[latest].guidedMode) setGuidedMode(true);
     } else {
       const fresh = newId();
       setCurrentSessionId(fresh);
     }
   }, []);
 
-  // Persist messages to current session
+  // Persist messages + guided mode to current session
   useEffect(() => {
     if (!currentSessionId) return;
     setSessions((prev) => {
@@ -87,19 +102,35 @@ export default function Home() {
         createdAt: existing?.createdAt || Date.now(),
         messages,
         preview: derivePreview(messages),
+        guidedMode,
       };
       const next = { ...prev, [currentSessionId]: updated };
       saveSessions(next);
       return next;
     });
-  }, [messages, currentSessionId]);
+  }, [messages, currentSessionId, guidedMode]);
 
   const send = useCallback(
     async (text: string) => {
       const userMsg: ChatMsg = { role: "user", text };
+
+      // In guided mode, treat input as quiz answer
+      if (guidedMode && activeQuiz && !answeredQuiz) {
+        const letterMatch = text.match(/^[A-Da-d]/);
+        const letter = letterMatch
+          ? letterMatch[0].toUpperCase()
+          : text.trim().toUpperCase().slice(0, 1);
+        setAnsweredQuiz({ quiz: activeQuiz, userAnswer: letter });
+        // Send the user's answer to Claude as a regular message
+        // Claude will return the next step (or retry)
+        // Continue with normal send
+      }
+
       const allMessages = [...messages, userMsg];
       setMessages(allMessages);
       setStreaming(true);
+      setActiveQuiz(null);
+      setRevealHint(false);
 
       const ctrl = new AbortController();
       abortRef.current = ctrl;
@@ -113,6 +144,7 @@ export default function Home() {
               role: m.role === "user" ? "user" : "assistant",
               content: m.text,
             })),
+            guidedMode,
           }),
           signal: ctrl.signal,
         });
@@ -165,6 +197,11 @@ export default function Home() {
                   ...prev,
                   { role: "system", text: parsed.text ?? "" },
                 ]);
+              } else if (name === "quiz") {
+                setActiveQuiz(parsed as Quiz);
+                setAnsweredQuiz(null);
+              } else if (name === "step") {
+                setActiveStep(parsed as Step);
               } else if (name === "tool_result") {
                 if (parsed.isError) {
                   setMessages((prev) => [
@@ -201,7 +238,7 @@ export default function Home() {
         setStreaming(false);
       }
     },
-    [messages],
+    [messages, guidedMode, activeQuiz, answeredQuiz],
   );
 
   const clearCanvas = () => {
@@ -214,6 +251,10 @@ export default function Home() {
   const handleSelectSession = (id: string) => {
     setCurrentSessionId(id);
     setMessages(sessions[id]?.messages ?? []);
+    setGuidedMode(sessions[id]?.guidedMode ?? false);
+    setActiveQuiz(null);
+    setAnsweredQuiz(null);
+    setActiveStep(null);
   };
 
   const handleDeleteSession = (id: string) => {
@@ -242,8 +283,35 @@ export default function Home() {
     const fresh = newId();
     setCurrentSessionId(fresh);
     setMessages([]);
+    setActiveQuiz(null);
+    setAnsweredQuiz(null);
+    setActiveStep(null);
     clearCanvas();
   };
+
+  const handleToggleGuided = () => {
+    const next = !guidedMode;
+    setGuidedMode(next);
+    // Reset quiz/step state on toggle change
+    if (next) {
+      // Turning ON: reset conversation to fresh start
+      handleNewSession();
+      setMessages([]);
+    } else {
+      setActiveQuiz(null);
+      setAnsweredQuiz(null);
+      setActiveStep(null);
+    }
+  };
+
+  const handleQuizAnswer = (letter: string) => {
+    if (!activeQuiz) return;
+    setAnsweredQuiz({ quiz: activeQuiz, userAnswer: letter });
+    // Auto-send the answer as a message to Claude
+    send(`My answer is ${letter}`);
+  };
+
+  const handleRevealHint = () => setRevealHint(true);
 
   const sessionList: Session[] = Object.values(sessions)
     .map((s) => ({
@@ -276,6 +344,14 @@ export default function Home() {
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
         onNewSession={handleNewSession}
+        guidedMode={guidedMode}
+        onToggleGuided={handleToggleGuided}
+        activeQuiz={activeQuiz}
+        activeStep={activeStep}
+        answeredQuiz={answeredQuiz}
+        onQuizAnswer={handleQuizAnswer}
+        revealHint={revealHint}
+        onRevealHint={handleRevealHint}
       />
     </div>
   );

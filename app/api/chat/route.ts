@@ -24,11 +24,41 @@ Respond with ONLY valid JSON (no markdown, no code fences):
 ${RECALL_CHEAT_SHEET}
 `;
 
+// Guided mode system prompt — teaches step-by-step with MCQ quizzes
+const GUIDED_SYSTEM_PROMPT = `You are TeachAgent in GUIDED LEARNING MODE — an interactive Hinglish tutor that teaches topics step-by-step through diagrams + multiple-choice quizzes.
+
+## Flow
+1. On the FIRST user message, plan the topic into 3-7 steps and respond with:
+   {"text":"<Hinglish intro + plan: 'Aaj hum X seekhenge — 4 steps mein. Chalo shuru karte hain! Step 1: ...'>","elements":[<step 1 diagram>],"quiz":{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","hint":"..."},"step":1,"total":4,"phase":"teach"}
+
+2. User replies with their answer (e.g. "B", "B) ISP", or text).
+3. Evaluate the answer:
+   - CORRECT: brief congrats + next step. Respond: {"text":"<correct! now step N>","elements":[<new diagram>],"quiz":{...},"step":N,"total":4,"phase":"teach"}
+   - WRONG: shorter/simpler diagram + hint. Respond: {"text":"<almost! let me show simpler>","elements":[<simpler diagram>],"quiz":{...with hint>","step":N,"total":4,"phase":"retry"}
+4. After last step: {"text":"🎉 Shabaash! Complete ho gaya. Summary: ...","elements":[<final overview diagram>],"step":N,"total":N,"phase":"done","summary":"..."}
+
+## Rules
+- "text" is Hinglish, conversational, 1-2 sentences
+- "elements" is the FULL Excalidraw diagram (cameraUpdate FIRST, then draw progressively)
+- "quiz" MUST have 4 options (A/B/C/D). Mark the correct one with letter only.
+- "hint" reveals on second wrong answer — reveal only when needed (set "hint":"shown" after showing)
+- "step" = current step number, "total" = total steps in plan
+- "phase" = "teach" (normal) | "retry" (after wrong answer, simpler diagram) | "done" (topic complete)
+- For "retry" phase: SIMPLIFY the diagram (fewer elements, clearer labels, highlight key part)
+- "summary" only on done phase — bullet list of what was learned
+
+## Response shape (CRITICAL — always this exact JSON, no markdown):
+{"text":"...","elements":[...],"quiz":{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","hint":"..."},"step":1,"total":4,"phase":"teach"}
+
+${RECALL_CHEAT_SHEET}
+`;
+
 type IncomingMessage = { role: "user" | "assistant"; content: string };
 
 export async function POST(req: Request) {
   const body = await req.json();
   const messages: IncomingMessage[] = body.messages ?? [];
+  const guidedMode: boolean = body.guidedMode ?? false;
 
   if (!process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
     return new Response(
@@ -115,7 +145,7 @@ export async function POST(req: Request) {
           const resp = await anthropic.messages.create({
             model: "claude-sonnet-4-5",
             max_tokens: 8192,
-            system: SYSTEM_PROMPT + canvasContext,
+            system: (guidedMode ? GUIDED_SYSTEM_PROMPT : SYSTEM_PROMPT) + canvasContext,
             messages: convo,
           });
 
@@ -184,6 +214,21 @@ export async function POST(req: Request) {
               send("status", {
                 text: `✅ Claude returned: ${drawnCount} drawn${delCount ? `, ${delCount} deletes` : ""}`,
               });
+
+              // Guided mode: emit quiz + step info
+              if (guidedMode) {
+                if (parsed.quiz && typeof parsed.quiz === "object") {
+                  send("quiz", parsed.quiz);
+                }
+                if (typeof parsed.step === "number") {
+                  send("step", {
+                    step: parsed.step,
+                    total: parsed.total ?? null,
+                    phase: parsed.phase ?? "teach",
+                    summary: parsed.summary ?? null,
+                  });
+                }
+              }
               break;
             }
             // Has text but no elements — likely clarifying question
@@ -192,6 +237,20 @@ export async function POST(req: Request) {
               send("status", {
                 text: "💬 Claude asked a clarifying question (no diagram)",
               });
+              // Guided mode may still emit quiz + step without elements (e.g., done phase)
+              if (guidedMode) {
+                if (parsed.quiz && typeof parsed.quiz === "object") {
+                  send("quiz", parsed.quiz);
+                }
+                if (typeof parsed.step === "number") {
+                  send("step", {
+                    step: parsed.step,
+                    total: parsed.total ?? null,
+                    phase: parsed.phase ?? "teach",
+                    summary: parsed.summary ?? null,
+                  });
+                }
+              }
               break;
             }
             convo = [

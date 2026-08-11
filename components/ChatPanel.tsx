@@ -7,6 +7,20 @@ export type ChatMsg = {
   text: string;
 };
 
+export type Quiz = {
+  question: string;
+  options: string[];
+  correct: string;
+  hint?: string;
+};
+
+export type Step = {
+  step: number;
+  total: number | null;
+  phase: "teach" | "retry" | "done";
+  summary?: string | null;
+};
+
 export type Session = {
   id: string;
   title: string;
@@ -28,6 +42,14 @@ export default function ChatPanel({
   onSelectSession,
   onDeleteSession,
   onNewSession,
+  guidedMode,
+  onToggleGuided,
+  activeQuiz,
+  activeStep,
+  answeredQuiz,
+  onQuizAnswer,
+  revealHint,
+  onRevealHint,
 }: {
   messages: ChatMsg[];
   onSend: (text: string) => void;
@@ -39,6 +61,14 @@ export default function ChatPanel({
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
   onNewSession: () => void;
+  guidedMode: boolean;
+  onToggleGuided: () => void;
+  activeQuiz: Quiz | null;
+  activeStep: Step | null;
+  answeredQuiz: { quiz: Quiz; userAnswer: string } | null;
+  onQuizAnswer: (optionLetter: string) => void;
+  revealHint: boolean;
+  onRevealHint: () => void;
 }) {
   const [input, setInput] = useState("");
   const [tab, setTab] = useState<Tab>("chat");
@@ -115,15 +145,87 @@ export default function ChatPanel({
       {/* ===== Tab content ===== */}
       {tab === "chat" ? (
         <>
+          {/* Guided mode toggle row (above messages) */}
+          <div
+            style={{
+              padding: "var(--s-md) var(--s-xl) var(--s-xs)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "var(--s-md)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--s-sm)",
+              }}
+            >
+              <span style={{ fontSize: "var(--t-body-sm)", color: "var(--color-slate)" }}>
+                Guided learning
+              </span>
+              {activeStep && (
+                <span className="badge badge-new" style={{ fontSize: "var(--t-micro)" }}>
+                  Step {activeStep.step}/{activeStep.total ?? "?"}
+                  {activeStep.phase === "retry" && " • retry"}
+                  {activeStep.phase === "done" && " • done"}
+                </span>
+              )}
+            </div>
+            <button
+              role="switch"
+              aria-checked={guidedMode}
+              onClick={onToggleGuided}
+              className={`toggle ${guidedMode ? "toggle-on" : ""}`}
+              title={
+                guidedMode
+                  ? "Guided mode ON — step-by-step with quizzes"
+                  : "Guided mode OFF — free chat"
+              }
+            >
+              <span className="toggle-thumb" />
+            </button>
+          </div>
+
+          {/* Guided progress bar */}
+          {guidedMode && activeStep && activeStep.total && (
+            <div
+              style={{
+                padding: "0 var(--s-xl) var(--s-sm)",
+              }}
+            >
+              <div className="progress-track">
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: `${(activeStep.step / activeStep.total) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="chat-messages" ref={scrollRef}>
             {messages.length === 0 && (
               <div className="msg system">
-                Type a topic — e.g.{" "}
-                <span style={{ color: "var(--color-ink)" }}>
-                  "phones ki working samjhao"
-                </span>
-                . Tu aur AI dono canvas pe draw kar sakte ho — WebSocket se sync
-                hota hai.
+                {guidedMode ? (
+                  <>
+                    Guided mode <b>ON</b>. Type a topic to start — e.g.{" "}
+                    <span style={{ color: "var(--color-ink)" }}>
+                      "photosynthesis samjhao"
+                    </span>
+                    . Main step-by-step diagram + MCQ ke saath sikhata hoon.
+                  </>
+                ) : (
+                  <>
+                    Type a topic — e.g.{" "}
+                    <span style={{ color: "var(--color-ink)" }}>
+                      "phones ki working samjhao"
+                    </span>
+                    . Tu aur AI dono canvas pe draw kar sakte ho.
+                  </>
+                )}
               </div>
             )}
             {messages.map((m, i) => (
@@ -136,7 +238,53 @@ export default function ChatPanel({
                 className="msg assistant"
                 style={{ color: "var(--color-slate)" }}
               >
-                <span>drawing on canvas…</span>
+                <span>{guidedMode ? "preparing step…" : "drawing on canvas…"}</span>
+              </div>
+            )}
+
+            {/* ===== MCQ Quiz Card ===== */}
+            {activeQuiz && !answeredQuiz && (
+              <QuizCard
+                quiz={activeQuiz}
+                onAnswer={onQuizAnswer}
+                streaming={streaming}
+                revealHint={revealHint}
+                onRevealHint={onRevealHint}
+              />
+            )}
+
+            {/* ===== Answer feedback ===== */}
+            {answeredQuiz && (
+              <AnswerFeedback
+                quiz={answeredQuiz.quiz}
+                userAnswer={answeredQuiz.userAnswer}
+              />
+            )}
+
+            {/* ===== Summary on done ===== */}
+            {activeStep?.phase === "done" && activeStep.summary && (
+              <div
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--color-brand-coral), var(--color-brand-magenta))",
+                  color: "var(--color-on-dark)",
+                  padding: "var(--s-md) var(--s-lg)",
+                  borderRadius: "var(--r-lg)",
+                  fontSize: "var(--t-body-sm)",
+                  margin: "var(--s-sm) 0",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 700,
+                    marginBottom: "var(--s-xs)",
+                    fontSize: "var(--t-card-title)",
+                  }}
+                >
+                  Topic Complete
+                </div>
+                {activeStep.summary}
               </div>
             )}
           </div>
@@ -153,7 +301,13 @@ export default function ChatPanel({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="Ask anything…"
+              placeholder={
+                guidedMode && activeQuiz
+                  ? "Type A, B, C, or D to answer…"
+                  : guidedMode
+                    ? "Ask the next step or type your answer…"
+                    : "Ask anything…"
+              }
               disabled={streaming}
             />
             <button
@@ -161,7 +315,7 @@ export default function ChatPanel({
               onClick={submit}
               disabled={streaming || !input.trim()}
             >
-              Send
+              {guidedMode && activeQuiz && !answeredQuiz ? "Answer" : "Send"}
             </button>
           </div>
         </>
@@ -253,5 +407,96 @@ export default function ChatPanel({
         </>
       )}
     </aside>
+  );
+}
+
+// ===== Quiz Card Component =====
+function QuizCard({
+  quiz,
+  onAnswer,
+  streaming,
+  revealHint,
+  onRevealHint,
+}: {
+  quiz: Quiz;
+  onAnswer: (letter: string) => void;
+  streaming: boolean;
+  revealHint: boolean;
+  onRevealHint: () => void;
+}) {
+  return (
+    <div className="quiz-card">
+      <div className="quiz-card-label">
+        <span className="badge badge-beta">QUIZ</span>
+        <span style={{ fontSize: "var(--t-micro)", color: "var(--color-slate)" }}>
+          Tap an option to answer
+        </span>
+      </div>
+      <div className="quiz-question">{quiz.question}</div>
+      <div className="quiz-options">
+        {quiz.options.map((opt, i) => {
+          const letter = String.fromCharCode(65 + i); // A, B, C, D
+          return (
+            <button
+              key={i}
+              className="quiz-option"
+              onClick={() => onAnswer(letter)}
+              disabled={streaming}
+            >
+              <span className="quiz-option-letter">{letter}</span>
+              <span>{opt.replace(/^[A-D]\)\s*/, "")}</span>
+            </button>
+          );
+        })}
+      </div>
+      {quiz.hint && (
+        <div style={{ marginTop: "var(--s-sm)" }}>
+          {revealHint ? (
+            <div className="quiz-hint">💡 {quiz.hint}</div>
+          ) : (
+            <button
+              className="btn btn-tertiary"
+              onClick={onRevealHint}
+              style={{ width: "100%", height: 32, fontSize: "var(--t-micro)" }}
+            >
+              Show hint
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== Answer Feedback Component =====
+function AnswerFeedback({
+  quiz,
+  userAnswer,
+}: {
+  quiz: Quiz;
+  userAnswer: string;
+}) {
+  const isCorrect = userAnswer.toUpperCase() === quiz.correct.toUpperCase();
+  const correctOption = quiz.options[
+    ["A", "B", "C", "D"].indexOf(quiz.correct.toUpperCase())
+  ];
+
+  return (
+    <div
+      className={`quiz-feedback ${isCorrect ? "correct" : "wrong"}`}
+    >
+      <div style={{ fontWeight: 700, fontSize: "var(--t-body-sm)" }}>
+        {isCorrect ? "✓ Sahi jawab!" : "✗ Galat jawab"}
+      </div>
+      <div style={{ fontSize: "var(--t-micro)", marginTop: "var(--s-xxs)" }}>
+        You chose: <b>{userAnswer.toUpperCase()}</b>
+        {!isCorrect && (
+          <>
+            {" · "}Correct: <b>{quiz.correct.toUpperCase()}</b> —{" "}
+            {correctOption?.replace(/^[A-D]\)\s*/, "")}
+          </>
+        )}
+      </div>
+    </div>
   );
 }
