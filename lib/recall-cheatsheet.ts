@@ -34,6 +34,43 @@ Use for: decision points.
 - \`strokeStyle\`: "solid" | "dashed" | "dotted"
 - \`startBinding\` / \`endBinding\`: \`{"elementId":"r1","gap":5,"focus":0}\`
 
+**CRITICAL Arrow Rules (READ CAREFULLY — arrows are the #1 source of bad diagrams):**
+
+Arrows MUST have bindings to snap to shapes. Without bindings, arrows float disconnected.
+
+**Exact pattern for a horizontal arrow from boxA (x=100, y=100, w=200, h=80) → boxB (x=400, y=100, w=200, h=80):**
+
+\`\`\`json
+{
+  "type":"arrow","id":"a1","x":300,"y":140,"width":100,"height":0,
+  "points":[[0,0],[100,0]],
+  "endArrowhead":"arrow",
+  "strokeStyle":"solid","strokeWidth":2,
+  "startBinding":{"elementId":"boxA","gap":5,"focus":0,"fixedPoint":[1,0.5]},
+  "endBinding":{"elementId":"boxB","gap":5,"focus":0,"fixedPoint":[0,0.5]}
+}
+\`\`\`
+
+**Key rules:**
+1. **points MUST start at [0, 0]** — never [0.5, 0] or [1, 0]. Use exactly \`[[0,0],[dx,dy]]\`.
+2. **Arrow x, y** = source shape's edge point: \`source.x + fixedPoint[0] * source.width\`, \`source.y + fixedPoint[1] * source.height\`.
+3. **Arrow width** = \`dx = target_edge_x - arrow.x\`. **height** = \`dy = target_edge_y - arrow.y\`.
+4. **fixedPoint** tells where on the shape the arrow connects:
+   - right edge midpoint: \`[1, 0.5]\`
+   - left edge midpoint: \`[0, 0.5]\`
+   - top edge midpoint: \`[0.5, 0]\`
+   - bottom edge midpoint: \`[0.5, 1]\`
+5. **points is OFFSETS from arrow (x,y)** — last point = [target_x - arrow_x, target_y - arrow_y].
+6. **NEVER leave arrow without startBinding AND endBinding.**
+7. **Source/target shapes' boundElements must include this arrow id** — bidirectional binding.
+
+**Wrong (don't do this):**
+- \`{"points":[[0.5, 0],[200.5, 0]]}\` — points don't start at [0,0]
+- \`{"points":[[100,100],[300,100]]}\` — points are absolute coords, not offsets
+- No \`startBinding\` — arrow floats disconnected
+- Arrow at \`x=0\` with points \`[[100,100],[300,100]]\` — random placement
+
+
 **L-shaped/elbow arrow**: \`"points":[[0,0],[100,0],[100,150]]\`
 
 **cameraUpdate** (pseudo, NOT drawn, controls viewport):
@@ -121,17 +158,21 @@ Canvas visible area is **1200 wide × 900 tall**. Use the FULL width:
 - ❌ Emoji in text — doesn't render in Excalidraw font
 - ❌ Empty title — always include one (28px, top-center)
 
-## Example — Good Diagram
+## Example — Good Diagram (with PROPER arrow bindings)
+
 \`\`\`json
 [
   {"type":"cameraUpdate","width":1200,"height":900,"x":0,"y":0},
   {"type":"text","id":"title","x":400,"y":30,"text":"How Internet Works","fontSize":28,"strokeColor":"#1e293b","groupIds":["g_internet"]},
-  {"type":"rectangle","id":"device","x":100,"y":150,"width":220,"height":100,"roundness":{"type":3},"backgroundColor":"#dbeafe","fillStyle":"solid","strokeColor":"#1e40af","label":{"text":"Your Device","fontSize":20},"groupIds":["g_internet"]},
-  {"type":"rectangle","id":"router","x":450,"y":150,"width":220,"height":100,"roundness":{"type":3},"backgroundColor":"#e0f2fe","fillStyle":"solid","strokeColor":"#0369a1","label":{"text":"Wi-Fi Router","fontSize":20},"groupIds":["g_internet"]},
-  {"type":"rectangle","id":"isp","x":800,"y":150,"width":220,"height":100,"roundness":{"type":3},"backgroundColor":"#f3e8ff","fillStyle":"solid","strokeColor":"#6b21a8","label":{"text":"ISP","fontSize":20},"groupIds":["g_internet"]},
-  {"type":"arrow","id":"a1","x":320,"y":200,"width":130,"height":0,"points":[[0,0],[130,0]],"endArrowhead":"arrow","startBinding":{"elementId":"device","fixedPoint":[1,0.5]},"endBinding":{"elementId":"router","fixedPoint":[0,0.5]},"groupIds":["g_internet"]}
+  {"type":"rectangle","id":"device","x":100,"y":150,"width":220,"height":100,"roundness":{"type":3},"backgroundColor":"#dbeafe","fillStyle":"solid","strokeColor":"#1e40af","boundElements":[{"id":"a1","type":"arrow"}],"label":{"text":"Your Device","fontSize":20},"groupIds":["g_internet"]},
+  {"type":"rectangle","id":"router","x":450,"y":150,"width":220,"height":100,"roundness":{"type":3},"backgroundColor":"#e0f2fe","fillStyle":"solid","strokeColor":"#0369a1","boundElements":[{"id":"a1","type":"arrow"},{"id":"a2","type":"arrow"}],"label":{"text":"Wi-Fi Router","fontSize":20},"groupIds":["g_internet"]},
+  {"type":"rectangle","id":"isp","x":800,"y":150,"width":220,"height":100,"roundness":{"type":3},"backgroundColor":"#f3e8ff","fillStyle":"solid","strokeColor":"#6b21a8","boundElements":[{"id":"a2","type":"arrow"}],"label":{"text":"ISP","fontSize":20},"groupIds":["g_internet"]},
+  {"type":"arrow","id":"a1","x":320,"y":200,"width":130,"height":0,"points":[[0,0],[130,0]],"endArrowhead":"arrow","strokeStyle":"solid","strokeWidth":2,"startBinding":{"elementId":"device","gap":5,"focus":0,"fixedPoint":[1,0.5]},"endBinding":{"elementId":"router","gap":5,"focus":0,"fixedPoint":[0,0.5]},"groupIds":["g_internet"]},
+  {"type":"arrow","id":"a2","x":670,"y":200,"width":130,"height":0,"points":[[0,0],[130,0]],"endArrowhead":"arrow","strokeStyle":"solid","strokeWidth":2,"startBinding":{"elementId":"router","gap":5,"focus":0,"fixedPoint":[1,0.5]},"endBinding":{"elementId":"isp","gap":5,"focus":0,"fixedPoint":[0,0.5]},"groupIds":["g_internet"]}
 ]
 \`\`\`
+
+Notice: each arrow's x = source's right edge (e.g. device ends at x=320, arrow starts at 320). Arrow points are offsets from arrow.x. Shape's boundElements list includes the arrow id.
 `;
 
 // System prompt wrapper — tells LLM how to behave + gives it the format
